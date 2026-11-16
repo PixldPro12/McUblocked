@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Version</title>
+  <style>
+    body { font-family: sans-serif; background: #111; color: #fff; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
+    .box { background: #222; padding: 20px; border-radius: 10px; width: 100%; max-width: 380px; }
+    input, button { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 10px; font-size: 16px; border-radius: 6px; border: none; }
+    input { background: #333; color: #fff; }
+    button { background: #2ea043; color: #fff; font-weight: bold; }
+    .toggle { background: none; color: #888; font-size: 13px; text-decoration: underline; margin-top: 15px; }
+    label { display: block; margin-top: 12px; font-size: 14px; color: #ccc; }
+    .hash-preview { font-family: monospace; font-size: 12px; color: #4ade80; word-break: break-all; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+  <!-- UNLOCK SCREEN -->
+  <div class="box" id="unlockView">
+    <h3 style="margin-top:0">Enter Password</h3>
+    <input type="password" id="unlockPwd" placeholder="Enter password..." onkeydown="if(event.key==='Enter') runApp()">
+    <button onclick="runApp()">Decrypt & Run</button>
+    <p id="status" style="color:#ff6b6b; font-size:14px;"></p>
+    <button class="toggle" onclick="switchMode(true)">Encrypt Mode (Phone Tool)</button>
+  </div>
+
+  <!-- ENCRYPT SCREEN -->
+  <div class="box" id="encryptView" style="display:none;">
+    <h3 style="margin-top:0">Encrypt Version Files</h3>
+    <label>1. Original index.html:<input type="file" id="fHtml" accept=".html"></label>
+    <label>2. classes.js:<input type="file" id="fJs" accept=".js"></label>
+    <label>3. assets.epk:<input type="file" id="fEpk" accept=".epk"></label>
+    <label>4. Create Password:<input type="password" id="encPwd" placeholder="Type a password..."></label>
+    <button onclick="encryptAll()">Encrypt & Download .enc Files</button>
+
+    <div id="hashBox" style="display:none; margin-top:12px;">
+      <span style="font-size:12px; color:#aaa;">Generated Base64 SHA-256 Key:</span>
+      <div class="hash-preview" id="b64Preview"></div>
+    </div>
+    <button class="toggle" onclick="switchMode(false)">Back to Unlock Screen</button>
+  </div>
+
+  <script>
+    const HTML_NAME = "index.html";
+    const JS_NAME   = "classes.js";
+    const EPK_NAME  = "assets.epk";
+
+    function switchMode(isEncrypt) {
+      document.getElementById("unlockView").style.display = isEncrypt ? "none" : "block";
+      document.getElementById("encryptView").style.display = isEncrypt ? "block" : "none";
+    }
+
+    const toB64 = buf => {
+      const bytes = new Uint8Array(buf);
+      let bin = "";
+      for (let i = 0; i < bytes.byteLength; i += 8192) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+      }
+      return btoa(bin);
+    };
+
+    const fromB64 = s => {
+      const bin = atob(s.trim());
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    };
+
+    // Turns your password -> SHA-256 hash -> Base64 string -> AES-GCM CryptoKey
+    async function passwordToBase64Key(password, usage) {
+      const enc = new TextEncoder();
+      // 1. Hash password with SHA-256 (produces 32 bytes)
+      const hashBuffer = await crypto.subtle.digest("SHA-256", enc.encode(password));
+      // 2. Convert that hash into a Base64 string
+      const base64Hash = toB64(hashBuffer);
+      // 3. Import the Base64 hash bytes as an AES-256 key
+      const cryptoKey = await crypto.subtle.importKey(
+        "raw",
+        fromB64(base64Hash),
+        { name: "AES-GCM" },
+        false,
+        [usage]
+      );
+      return { cryptoKey, base64Hash };
+    }
+
+    // --- ENCRYPT ON PHONE ---
+    async function encryptAll() {
+      const pwd = document.getElementById("encPwd").value;
+      const files = [
+        { el: document.getElementById("fHtml").files, out: HTML_NAME + ".enc" },
+        { el: document.getElementById("fJs").files,   out: JS_NAME + ".enc" },
+        { el: document.getElementById("fEpk").files,  out: EPK_NAME + ".enc" }
+      ];
+
+      if (files.some(f => !f.el)) return alert("Select all 3 files first!");
+      if (!pwd) return alert("Please enter a password!");
+
+      const { cryptoKey, base64Hash } = await passwordToBase64Key(pwd, "encrypt");
+
+      // Show the Base64 hash created from your password
+      document.getElementById("b64Preview").textContent = base64Hash;
+      document.getElementById("hashBox").style.display = "block";
+
+      for (const f of files) {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const buf = await f.el.arrayBuffer();
+        const enc = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, cryptoKey, buf);
+        const json = JSON.stringify({ iv: toB64(iv), data: toB64(enc) });
+
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(new Blob([json], { type: "application/octet-stream" }));
+        a.download = f.out;
+        a.click();
+        await new Promise(r => setTimeout(r, 400));
+      }
+    }
+
+    // --- DECRYPT & RUN ---
+    async function fetchDecrypt(name, cryptoKey) {
+      const res = await fetch(name + ".enc");
+      const json = await res.json();
+      return await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(json.iv) }, cryptoKey, fromB64(json.data));
+    }
+
+    async function runApp() {
+      const status = document.getElementById("status");
+      const pwd = document.getElementById("unlockPwd").value;
+      if (!pwd) return (status.textContent = "Please enter your password.");
+
+      status.textContent = "Hashing password & decrypting...";
+      try {
+        const { cryptoKey } = await passwordToBase64Key(pwd, "decrypt");
+
+        const [htmlBuf, jsBuf, epkBuf] = await Promise.all([
+          fetchDecrypt(HTML_NAME, cryptoKey),
+          fetchDecrypt(JS_NAME, cryptoKey),
+          fetchDecrypt(EPK_NAME, cryptoKey)
+        ]);
+
+        const jsUrl  = URL.createObjectURL(new Blob([jsBuf],  { type: "application/javascript" }));
+        const epkUrl = URL.createObjectURL(new Blob([epkBuf], { type: "application/octet-stream" }));
+
+        let html = new TextDecoder().decode(htmlBuf);
+        html = html.split(JS_NAME).join(jsUrl).split(EPK_NAME).join(epkUrl);
+
+        document.open();
+        document.write(html);
+        document.close();
+      } catch (e) {
+        status.textContent = "Wrong password or .enc files missing in Version/.";
+      }
+    }
+  </script>
+</body>
+</html>
