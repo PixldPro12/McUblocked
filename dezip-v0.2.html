@@ -2,188 +2,120 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Version</title>
+  <title>Dekryptor-v0.4</title>
   <style>
-    body { font-family: sans-serif; background: #111; color: #fff; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
-    .box { background: #222; padding: 20px; border-radius: 10px; width: 100%; max-width: 360px; }
-    input, select, button, .dl-btn { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 10px; font-size: 16px; border-radius: 6px; border: none; display: block; text-align: center; text-decoration: none; }
-    input, select { background: #333; color: #fff; text-align: left; }
-    button { background: #2ea043; color: #fff; font-weight: bold; }
-    .dl-btn { background: #1f6feb; color: #fff; font-weight: bold; }
-    .toggle { background: none; color: #888; font-size: 13px; text-decoration: underline; margin-top: 15px; }
-    label { display: block; margin-top: 12px; font-size: 14px; color: #ccc; }
+    * { box-sizing: border-box; font-family: Consolas, monospace; }
+    body { background: #1b1d1a; color: #d8ded3; margin: 0; padding: 12px; display: flex; justify-content: center; align-items: center; min-height: 95vh; }
+    .win { width: 100%; max-width: 460px; background: #2f342d; border: 2px solid; border-color: #596055 #151714 #151714 #596055; padding: 8px; }
+    .log { background: #181a17; border: 2px solid; border-color: #10120f #4c5249 #4c5249 #10120f; height: 290px; overflow-y: auto; padding: 8px; font-size: 12px; line-height: 1.4; white-space: pre-wrap; }
+    .row { display: flex; gap: 6px; margin-top: 6px; }
+    input, select { flex: 1; background: #181a17; color: #e6ece0; border: 2px solid; border-color: #10120f #4c5249 #4c5249 #10120f; padding: 8px; font-size: 14px; }
+    button, .dl { background: #3d433a; color: #e6ece0; border: 2px solid; border-color: #596055 #151714 #151714 #596055; padding: 8px 12px; font-weight: bold; text-align: center; text-decoration: none; display: block; }
+    .dl { color: #d9822b; margin-top: 5px; }
+    .b { color: #d9822b; font-weight: bold; } .ok { color: #90c95b; } .w { color: #e5b54f; } .err { color: #ff5555; font-weight: bold; }
   </style>
 </head>
 <body>
+<div class="win">
+  <div style="font-size:13px;font-weight:bold;padding-bottom:6px;">] Console — Dekryptor-v0.4 <span style="float:right;color:#90c95b;">READY</span></div>
+  <div class="log" id="out"></div>
 
-  <!-- UNLOCK SCREEN -->
-  <div class="box" id="unlockView">
-    <h3 style="margin-top:0">Enter Password</h3>
-    <input type="password" id="unlockPwd" placeholder="Enter password..." onkeydown="if(event.key==='Enter') runApp()">
-    <button onclick="runApp()">Decrypt & Run</button>
-    <p id="status" style="color:#ff6b6b; font-size:14px;"></p>
-    <button class="toggle" onclick="switchMode(true)">Encrypt 1 File at a Time</button>
+  <div id="uBar" class="row">
+    <input type="password" id="uPwd" placeholder="Enter password..." onkeydown="if(event.key==='Enter')run()">
+    <button onclick="run()">Submit</button>
   </div>
 
-  <!-- SINGLE-FILE ENCRYPT SCREEN -->
-  <div class="box" id="encryptView" style="display:none;">
-    <h3 style="margin-top:0">Encrypt One File</h3>
-    
-    <label>1. Which file are you encrypting?
-      <select id="targetName">
-        <option value="index.html">index.html</option>
-        <option value="classes.js">classes.js</option>
-        <option value="assets.epk">assets.epk</option>
-      </select>
-    </label>
-
-    <label>2. Pick the file from your phone:
-      <input type="file" id="singleFile">
-    </label>
-
-    <label>3. Password:
-      <input type="password" id="encPwd" placeholder="Enter password...">
-    </label>
-
-    <button id="encBtn" onclick="encryptOne()">Encrypt File</button>
-    <div id="dlArea" style="margin-top:10px;"></div>
-    <p id="encStatus" style="color:#4ade80; font-size:14px;"></p>
-
-    <button class="toggle" onclick="switchMode(false)">Back to Unlock Screen</button>
+  <div id="eBar" style="display:none;margin-top:6px;">
+    <select id="tName" style="width:100%"><option>index.html</option><option>classes.js</option><option>assets.epk</option></select>
+    <input type="file" id="fIn" style="width:100%;margin-top:6px;">
+    <div class="row"><input type="password" id="ePwd" placeholder="Create password..."><button onclick="encOne()">Encrypt</button></div>
+    <div id="dl"></div>
   </div>
 
-  <script>
-    const HTML_NAME = "index.html";
-    const JS_NAME   = "classes.js";
-    const EPK_NAME  = "assets.epk";
-    const MAX_CHUNK_SIZE = 18 * 1024 * 1024;
+  <div class="row" style="justify-content:space-between;">
+    <button onclick="init()" style="font-size:11px;padding:4px 8px;">Clear</button>
+    <button id="mBtn" onclick="flip()" style="font-size:11px;padding:4px 8px;">Mode: Encrypt</button>
+  </div>
+</div>
 
-    function switchMode(isEncrypt) {
-      document.getElementById("unlockView").style.display = isEncrypt ? "none" : "block";
-      document.getElementById("encryptView").style.display = isEncrypt ? "block" : "none";
+<script>
+const FILES = ["index.html", "assets.epk", "classes.js"], CHUNK = 18 * 1024 * 1024, out = document.getElementById("out");
+let encMode = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const log = (t, c = "") => { out.innerHTML += `<div class="${c}">${t}</div>`; out.scrollTop = out.scrollHeight; };
+
+function init() {
+  out.innerHTML = "";
+  log("/###############/\n/ Dekryptor-v0.4 /\n/###############/", "b");
+  log("Awaiting password input...", "w");
+}
+
+function flip() {
+  encMode = !encMode;
+  uBar.style.display = encMode ? "none" : "flex";
+  eBar.style.display = encMode ? "block" : "none";
+  mBtn.textContent = encMode ? "Mode: Unlock" : "Mode: Encrypt";
+}
+
+const toB64 = b => { let u = new Uint8Array(b), s = ""; for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(s); };
+const fromB64 = s => Uint8Array.from(atob(s.trim()), c => c.charCodeAt(0));
+const getKey = async (p, u) => crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", new TextEncoder().encode(p)), "AES-GCM", false, [u]);
+
+async function blocks(label) {
+  log(`Decryption of ${label}`, "w");
+  for (let i = 1; i <= 10; i++) { log(`Block ${i}/10 complete`); await sleep(25); }
+}
+
+async function fetchPkg(name) {
+  let r = await fetch(name + ".enc");
+  if (r.ok) { log(`  ${name}.enc [OK]`, "ok"); return { txt: await r.text(), sliced: false }; }
+  let txt = "", p = 1;
+  while ((r = await fetch(`${name}.enc.${p}`)).ok) { log(`  ${name}.enc.${p} [OK]`, "ok"); txt += await r.text(); p++; }
+  if (!txt) throw new Error(`Missing ${name}.enc`);
+  return { txt, sliced: true };
+}
+
+async function run() {
+  const pwd = uPwd.value;
+  if (!pwd) return log("ERROR: No password entered.", "err");
+  log("Password given!\nPreparing for decryption...\nChecking Required Files for decrypt:", "w");
+
+  try {
+    const key = await getKey(pwd, "decrypt"), bufs = {};
+    for (const f of FILES) {
+      const pkg = await fetchPkg(f);
+      if (pkg.sliced) { log(`PREPARE to stitch files (${f}.enc.*)...`, "w"); await blocks(`${f} (stitched)`); log("Decryption Of Sliced Files Complete", "ok"); }
+      else await blocks(f + ".enc");
+      const j = JSON.parse(pkg.txt);
+      bufs[f] = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(j.iv) }, key, fromB64(j.data));
     }
+    const jsUrl = URL.createObjectURL(new Blob([bufs["classes.js"]], { type: "application/javascript" }));
+    const epkUrl = URL.createObjectURL(new Blob([bufs["assets.epk"]], { type: "application/octet-stream" }));
+    let html = new TextDecoder().decode(bufs["index.html"]).split("classes.js").join(jsUrl).split("assets.epk").join(epkUrl);
+    log("Executing game...", "ok"); await sleep(200);
+    document.open(); document.write(html); document.close();
+  } catch (e) { log(`FATAL ERROR: ${e.message || e.name}`, "err"); }
+}
 
-    const toB64 = buf => {
-      const bytes = new Uint8Array(buf);
-      let bin = "";
-      for (let i = 0; i < bytes.byteLength; i += 8192) {
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
-      }
-      return btoa(bin);
-    };
-
-    const fromB64 = s => {
-      const bin = atob(s.trim());
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return bytes;
-    };
-
-    async function getKey(password, usage) {
-      const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password));
-      return await crypto.subtle.importKey("raw", hash, { name: "AES-GCM" }, false, [usage]);
-    }
-
-    // --- ENCRYPT & AUTO-SPLIT IF > 18MB ---
-    async function encryptOne() {
-      const fileInput = document.getElementById("singleFile");
-      const file = fileInput.files[0];
-      const target = document.getElementById("targetName").value;
-      const pwd = document.getElementById("encPwd").value;
-      const status = document.getElementById("encStatus");
-      const dlArea = document.getElementById("dlArea");
-
-      if (!file) return alert("Pick a file first!");
-      if (!pwd) return alert("Enter a password!");
-
-      status.textContent = "Encrypting " + target + "...";
-      dlArea.innerHTML = "";
-
-      try {
-        const key = await getKey(pwd, "encrypt");
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const buf = await file.arrayBuffer();
-        const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, buf);
-
-        const fullPayload = JSON.stringify({ iv: toB64(iv), data: toB64(encrypted) });
-
-        if (fullPayload.length <= MAX_CHUNK_SIZE) {
-          createDownloadBtn(dlArea, fullPayload, target + ".enc");
-          status.textContent = "Ready! Tap the blue button to save.";
-        } else {
-          const totalParts = Math.ceil(fullPayload.length / MAX_CHUNK_SIZE);
-          for (let i = 0; i < totalParts; i++) {
-            const slice = fullPayload.slice(i * MAX_CHUNK_SIZE, (i + 1) * MAX_CHUNK_SIZE);
-            createDownloadBtn(dlArea, slice, `${target}.enc.${i + 1}`);
-          }
-          status.textContent = `Split into ${totalParts} parts (under 25MB each). Download and upload all parts!`;
-        }
-      } catch (e) {
-        status.textContent = "Error: " + e.message;
-      }
-    }
-
-    function createDownloadBtn(container, textData, filename) {
-      const blob = new Blob([textData], { type: "application/octet-stream" });
+async function encOne() {
+  const file = fIn.files, name = tName.value, pwd = ePwd.value;
+  if (!file || !pwd) return log("ERROR: Pick a file and enter a password.", "err");
+  log(`Password given!\nPreparing for encryption of ${name}...`, "w"); dl.innerHTML = "";
+  try {
+    const key = await getKey(pwd, "encrypt"), iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, await file.arrayBuffer());
+    const payload = JSON.stringify({ iv: toB64(iv), data: toB64(enc) });
+    const parts = Math.ceil(payload.length / CHUNK);
+    for (let i = 0; i < parts; i++) {
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = filename;
-      a.className = "dl-btn";
-      a.textContent = "Download " + filename;
-      container.appendChild(a);
+      a.href = URL.createObjectURL(new Blob([payload.slice(i * CHUNK, (i + 1) * CHUNK)]));
+      a.download = parts === 1 ? `${name}.enc` : `${name}.enc.${i + 1}`;
+      a.className = "dl"; a.textContent = `Download ${a.download}`; dl.appendChild(a);
     }
-
-    // --- FETCH SINGLE OR SPLIT .ENC FILES & DECRYPT ---
-    async function fetchJoinedText(name) {
-      const singleRes = await fetch(name + ".enc");
-      if (singleRes.ok) return await singleRes.text();
-
-      let joined = "";
-      let part = 1;
-      while (true) {
-        const partRes = await fetch(`${name}.enc.${part}`);
-        if (!partRes.ok) break;
-        joined += await partRes.text();
-        part++;
-      }
-      if (!joined) throw new Error("Missing " + name);
-      return joined;
-    }
-
-    async function fetchDecrypt(name, key) {
-      const rawText = await fetchJoinedText(name);
-      const json = JSON.parse(rawText);
-      return await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(json.iv) }, key, fromB64(json.data));
-    }
-
-    async function runApp() {
-      const status = document.getElementById("status");
-      const pwd = document.getElementById("unlockPwd").value;
-      if (!pwd) return (status.textContent = "Please enter your password.");
-
-      status.textContent = "Decrypting...";
-      try {
-        const key = await getKey(pwd, "decrypt");
-
-        const [htmlBuf, jsBuf, epkBuf] = await Promise.all([
-          fetchDecrypt(HTML_NAME, key),
-          fetchDecrypt(JS_NAME, key),
-          fetchDecrypt(EPK_NAME, key)
-        ]);
-
-        const jsUrl  = URL.createObjectURL(new Blob([jsBuf],  { type: "application/javascript" }));
-        const epkUrl = URL.createObjectURL(new Blob([epkBuf], { type: "application/octet-stream" }));
-
-        let html = new TextDecoder().decode(htmlBuf);
-        html = html.split(JS_NAME).join(jsUrl).split(EPK_NAME).join(epkUrl);
-
-        document.open();
-        document.write(html);
-        document.close();
-      } catch (e) {
-        status.textContent = "Wrong password or .enc files missing.";
-      }
-    }
-  </script>
+    log(`Encryption complete (${parts} file${parts > 1 ? "s" : ""}).`, "ok");
+  } catch (e) { log(`ERROR: ${e.message}`, "err"); }
+}
+init();
+</script>
 </body>
 </html>
