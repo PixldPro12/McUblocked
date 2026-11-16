@@ -6,12 +6,13 @@
   <style>
     body { font-family: sans-serif; background: #111; color: #fff; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
     .box { background: #222; padding: 20px; border-radius: 10px; width: 100%; max-width: 380px; }
-    input, button { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 10px; font-size: 16px; border-radius: 6px; border: none; }
-    input { background: #333; color: #fff; }
+    input, button, .dl-btn { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 10px; font-size: 16px; border-radius: 6px; border: none; display: block; text-align: center; text-decoration: none; }
+    input { background: #333; color: #fff; text-align: left; }
     button { background: #2ea043; color: #fff; font-weight: bold; }
+    .dl-btn { background: #1f6feb; color: #fff; font-weight: bold; }
     .toggle { background: none; color: #888; font-size: 13px; text-decoration: underline; margin-top: 15px; }
     label { display: block; margin-top: 12px; font-size: 14px; color: #ccc; }
-    .hash-preview { font-family: monospace; font-size: 12px; color: #4ade80; word-break: break-all; margin-top: 8px; }
+    .hash-preview { font-family: monospace; font-size: 12px; color: #4ade80; word-break: break-all; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -32,11 +33,12 @@
     <label>2. classes.js:<input type="file" id="fJs" accept=".js"></label>
     <label>3. assets.epk:<input type="file" id="fEpk" accept=".epk"></label>
     <label>4. Create Password:<input type="password" id="encPwd" placeholder="Type a password..."></label>
-    <button onclick="encryptAll()">Encrypt & Download .enc Files</button>
+    <button id="encBtn" onclick="encryptAll()">Encrypt Files</button>
 
-    <div id="hashBox" style="display:none; margin-top:12px;">
+    <div id="hashBox" style="display:none; margin-top:15px;">
       <span style="font-size:12px; color:#aaa;">Generated Base64 SHA-256 Key:</span>
       <div class="hash-preview" id="b64Preview"></div>
+      <div id="dlLinks" style="margin-top:10px;"></div>
     </div>
     <button class="toggle" onclick="switchMode(false)">Back to Unlock Screen</button>
   </div>
@@ -67,25 +69,17 @@
       return bytes;
     };
 
-    // Turns your password -> SHA-256 hash -> Base64 string -> AES-GCM CryptoKey
     async function passwordToBase64Key(password, usage) {
       const enc = new TextEncoder();
-      // 1. Hash password with SHA-256 (produces 32 bytes)
       const hashBuffer = await crypto.subtle.digest("SHA-256", enc.encode(password));
-      // 2. Convert that hash into a Base64 string
       const base64Hash = toB64(hashBuffer);
-      // 3. Import the Base64 hash bytes as an AES-256 key
       const cryptoKey = await crypto.subtle.importKey(
-        "raw",
-        fromB64(base64Hash),
-        { name: "AES-GCM" },
-        false,
-        [usage]
+        "raw", fromB64(base64Hash), { name: "AES-GCM" }, false, [usage]
       );
       return { cryptoKey, base64Hash };
     }
 
-    // --- ENCRYPT ON PHONE ---
+    // --- ENCRYPT ON PHONE WITH TAP-TO-DOWNLOAD BUTTONS ---
     async function encryptAll() {
       const pwd = document.getElementById("encPwd").value;
       const files = [
@@ -97,11 +91,15 @@
       if (files.some(f => !f.el)) return alert("Select all 3 files first!");
       if (!pwd) return alert("Please enter a password!");
 
-      const { cryptoKey, base64Hash } = await passwordToBase64Key(pwd, "encrypt");
+      const btn = document.getElementById("encBtn");
+      btn.textContent = "Encrypting (Please wait)...";
 
-      // Show the Base64 hash created from your password
+      const { cryptoKey, base64Hash } = await passwordToBase64Key(pwd, "encrypt");
       document.getElementById("b64Preview").textContent = base64Hash;
       document.getElementById("hashBox").style.display = "block";
+
+      const dlContainer = document.getElementById("dlLinks");
+      dlContainer.innerHTML = "";
 
       for (const f of files) {
         const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -109,12 +107,16 @@
         const enc = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, cryptoKey, buf);
         const json = JSON.stringify({ iv: toB64(iv), data: toB64(enc) });
 
+        const url = URL.createObjectURL(new Blob([json], { type: "application/octet-stream" }));
         const a = document.createElement("a");
-        a.href = URL.createObjectURL(new Blob([json], { type: "application/octet-stream" }));
+        a.href = url;
         a.download = f.out;
-        a.click();
-        await new Promise(r => setTimeout(r, 400));
+        a.className = "dl-btn";
+        a.textContent = "Download " + f.out;
+        dlContainer.appendChild(a);
       }
+
+      btn.textContent = "Done! Tap each blue button below:";
     }
 
     // --- DECRYPT & RUN ---
