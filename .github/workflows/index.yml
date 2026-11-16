@@ -1,0 +1,56 @@
+name: Generate Apache Index
+on:
+  push:
+    branches: [ main ]
+permissions:
+  contents: write
+
+jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Index of HTML files
+        run: |
+          python3 -c '
+          import os, datetime
+
+          for root, dirs, files in os.walk("."):
+              if ".git" in root or ".github" in root:
+                  continue
+              dirs[:] = sorted([d for d in dirs if not d.startswith(".")])
+              files = sorted([f for f in files if f != "index.html" and not f.startswith(".")])
+              
+              # Skip overwriting existing custom index.html in Version or Index
+              if os.path.exists(os.path.join(root, "index.html")) and root != ".":
+                  continue
+
+              rel = root.lstrip("./")
+              title = f"Index of /McUblocked/{rel}".rstrip("/")
+              lines = [
+                  "<!DOCTYPE html><html><head><meta charset=\"utf-8\">",
+                  f"<title>{title}</title></head><body>",
+                  f"<h1>{title}</h1><hr><pre>",
+                  "<a href=\"../\">../</a>"
+              ]
+              for d in dirs:
+                  t = datetime.datetime.now().strftime("%d-%b-%Y %H:%M")
+                  lines.append(f"<a href=\"{d}/\">{d + \"/\":<50}</a> {t}                   -")
+              for f in files:
+                  p = os.path.join(root, f)
+                  size = os.path.getsize(p)
+                  t = datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d-%b-%Y %H:%M")
+                  lines.append(f"<a href=\"{f}\">{f:<50}</a> {t} {size:>19}")
+              lines.append("</pre><hr><address>Apache/2.4.58 (Unix) Server at pixldpro12.github.io Port 80</address></body></html>")
+              
+              with open(os.path.join(root, "index.html"), "w") as out:
+                  out.write("\n".join(lines))
+          '
+      - name: Commit generated indexes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .
+          git diff --staged --quiet || git commit -m "Auto-update directory index"
+          git push
+          
