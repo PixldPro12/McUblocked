@@ -12,40 +12,31 @@ jobs:
       - uses: actions/checkout@v4
       - name: Generate Index of HTML files
         run: |
-          python3 -c '
-          import os, datetime
-
-          for root, dirs, files in os.walk("."):
-              if ".git" in root or ".github" in root:
-                  continue
-              dirs[:] = sorted([d for d in dirs if not d.startswith(".")])
-              files = sorted([f for f in files if f != "index.html" and not f.startswith(".")])
-              
-              # Skip overwriting existing custom index.html in Version or Index
-              if os.path.exists(os.path.join(root, "index.html")) and root != ".":
-                  continue
-
-              rel = root.lstrip("./")
-              title = f"Index of /McUblocked/{rel}".rstrip("/")
-              lines = [
-                  "<!DOCTYPE html><html><head><meta charset=\"utf-8\">",
-                  f"<title>{title}</title></head><body>",
-                  f"<h1>{title}</h1><hr><pre>",
-                  "<a href=\"../\">../</a>"
-              ]
-              for d in dirs:
-                  t = datetime.datetime.now().strftime("%d-%b-%Y %H:%M")
-                  lines.append(f"<a href=\"{d}/\">{d + \"/\":<50}</a> {t}                   -")
-              for f in files:
-                  p = os.path.join(root, f)
-                  size = os.path.getsize(p)
-                  t = datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d-%b-%Y %H:%M")
-                  lines.append(f"<a href=\"{f}\">{f:<50}</a> {t} {size:>19}")
-              lines.append("</pre><hr><address>Apache/2.4.58 (Unix) Server at pixldpro12.github.io Port 80</address></body></html>")
-              
-              with open(os.path.join(root, "index.html"), "w") as out:
-                  out.write("\n".join(lines))
-          '
+          find . -maxdepth 4 -not -path '*/.*' -type d | while read -r dir; do
+            if [ "$dir" != "." ] && [ -f "$dir/index.html" ]; then
+              continue
+            fi
+            clean="${dir#./}"
+            [ "$dir" = "." ] && title="Index of /McUblocked" || title="Index of /McUblocked/$clean"
+            {
+              echo "<!DOCTYPE html><html><head><meta charset='utf-8'><title>$title</title></head><body>"
+              echo "<h1>$title</h1><hr><pre>"
+              echo "<a href='../'>../</a>"
+              for item in "$dir"/*; do
+                [ -e "$item" ] || continue
+                name=$(basename "$item")
+                [ "$name" = "index.html" ] && continue
+                date=$(date -r "$item" "+%d-%b-%Y %H:%M")
+                if [ -d "$item" ]; then
+                  printf "<a href='%s/'>%-50s</a> %s                   -\n" "$name" "$name/" "$date"
+                else
+                  size=$(stat -c%s "$item")
+                  printf "<a href='%s'>%-50s</a> %s %19s\n" "$name" "$name" "$date" "$size"
+                fi
+              done
+              echo "</pre><hr><address>Apache/2.4.58 (Unix) Server at pixldpro12.github.io Port 80</address></body></html>"
+            } > "$dir/index.html"
+          done
       - name: Commit generated indexes
         run: |
           git config user.name "github-actions"
