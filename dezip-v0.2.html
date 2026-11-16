@@ -6,9 +6,10 @@
   <style>
     body { font-family: sans-serif; background: #111; color: #fff; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
     .box { background: #222; padding: 20px; border-radius: 10px; width: 100%; max-width: 360px; }
-    input, select, button { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 10px; font-size: 16px; border-radius: 6px; border: none; }
-    input, select { background: #333; color: #fff; }
+    input, select, button, .dl-btn { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 10px; font-size: 16px; border-radius: 6px; border: none; display: block; text-align: center; text-decoration: none; }
+    input, select { background: #333; color: #fff; text-align: left; }
     button { background: #2ea043; color: #fff; font-weight: bold; }
+    .dl-btn { background: #1f6feb; color: #fff; font-weight: bold; }
     .toggle { background: none; color: #888; font-size: 13px; text-decoration: underline; margin-top: 15px; }
     label { display: block; margin-top: 12px; font-size: 14px; color: #ccc; }
   </style>
@@ -44,7 +45,8 @@
       <input type="password" id="encPwd" placeholder="Enter password...">
     </label>
 
-    <button id="encBtn" onclick="encryptOne()">Encrypt & Download .enc</button>
+    <button id="encBtn" onclick="encryptOne()">Encrypt File</button>
+    <div id="dlArea" style="margin-top:10px;"></div>
     <p id="encStatus" style="color:#4ade80; font-size:14px;"></p>
 
     <button class="toggle" onclick="switchMode(false)">Back to Unlock Screen</button>
@@ -54,6 +56,8 @@
     const HTML_NAME = "index.html";
     const JS_NAME   = "classes.js";
     const EPK_NAME  = "assets.epk";
+    // Split output into 18MB chunks so every file stays safely under GitHub's 25MB limit
+    const MAX_CHUNK_SIZE = 18 * 1024 * 1024;
 
     function switchMode(isEncrypt) {
       document.getElementById("unlockView").style.display = isEncrypt ? "none" : "block";
@@ -81,17 +85,19 @@
       return await crypto.subtle.importKey("raw", hash, { name: "AES-GCM" }, false, [usage]);
     }
 
-    // --- ENCRYPT ONE FILE ---
+    // --- ENCRYPT & AUTO-SPLIT IF > 18MB ---
     async function encryptOne() {
-      const file = document.getElementById("singleFile").files[0];
+      const file = document.getElementById("singleFile").files;
       const target = document.getElementById("targetName").value;
       const pwd = document.getElementById("encPwd").value;
       const status = document.getElementById("encStatus");
+      const dlArea = document.getElementById("dlArea");
 
       if (!file) return alert("Pick a file first!");
       if (!pwd) return alert("Enter a password!");
 
       status.textContent = "Encrypting " + target + "...";
+      dlArea.innerHTML = "";
 
       try {
         const key = await getKey(pwd, "encrypt");
@@ -99,27 +105,58 @@
         const buf = await file.arrayBuffer();
         const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, buf);
 
-        const json = JSON.stringify({ iv: toB64(iv), data: toB64(encrypted) });
-        const blob = new Blob([json], { type: "application/octet-stream" });
+        const fullPayload = JSON.stringify({ iv: toB64(iv), data: toB64(encrypted) });
 
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = target + ".enc";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        status.textContent = "Downloaded " + target + ".enc! Pick the next file above.";
-        document.getElementById("singleFile").value = "";
+        if (fullPayload.length <= MAX_CHUNK_SIZE) {
+          // Small enough for 1 single .enc file
+          createDownloadBtn(dlArea, fullPayload, target + ".enc");
+          status.textContent = "Ready! Tap the blue button to save.";
+        } else {
+          // Split into .enc.1, .enc.2, etc. (all under 18MB)
+          const totalParts = Math.ceil(fullPayload.length / MAX_CHUNK_SIZE);
+          for (let i = 0; i < totalParts; i++) {
+            const slice = fullPayload.slice(i * MAX_CHUNK_SIZE, (i + 1) * MAX_CHUNK_SIZE);
+            createDownloadBtn(dlArea, slice, `${target}.enc.${i + 1}`);
+          }
+          status.textContent = `Split into ${totalParts} parts (under 25MB each). Download and upload all parts!`;
+        }
       } catch (e) {
         status.textContent = "Error: " + e.message;
       }
     }
 
-    // --- DECRYPT & RUN ALL THREE ---
+    function createDownloadBtn(container, textData, filename) {
+      const blob = new Blob([textData], { type: "application/octet-stream" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.className = "dl-btn";
+      a.textContent = "Download " + filename;
+      container.appendChild(a);
+    }
+
+    // --- FETCH SINGLE OR SPLIT .ENC FILES & DECRYPT ---
+    async function fetchJoinedText(name) {
+      // Try single .enc file first
+      const singleRes = await fetch(name + ".enc");
+      if (singleRes.ok) return await singleRes.text();
+
+      // Otherwise fetch .enc.1, .enc.2, ... until 404
+      let joined = "";
+      let part = 1;
+      while (true) {
+        const partRes = await fetch(`${name}.enc.${part}`);
+        if (!partRes.ok) break;
+        joined += await partRes.text();
+        part++;
+      }
+      if (!joined) throw new Error("Missing " + name);
+      return joined;
+    }
+
     async function fetchDecrypt(name, key) {
-      const res = await fetch(name + ".enc");
-      const json = await res.json();
+      const rawText = await fetchJoinedText(name);
+      const json = JSON.parse(rawText);
       return await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(json.iv) }, key, fromB64(json.data));
     }
 
@@ -148,7 +185,7 @@
         document.write(html);
         document.close();
       } catch (e) {
-        status.textContent = "Wrong password or .enc files missing.";
+        status.textContent = "Wrong password or missing .enc files.";
       }
     }
   </script>
