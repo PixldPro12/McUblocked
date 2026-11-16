@@ -56,7 +56,6 @@
     const HTML_NAME = "index.html";
     const JS_NAME   = "classes.js";
     const EPK_NAME  = "assets.epk";
-    // Split output into 18MB chunks so every file stays safely under GitHub's 25MB limit
     const MAX_CHUNK_SIZE = 18 * 1024 * 1024;
 
     function switchMode(isEncrypt) {
@@ -87,7 +86,8 @@
 
     // --- ENCRYPT & AUTO-SPLIT IF > 18MB ---
     async function encryptOne() {
-      const file = document.getElementById("singleFile").files;
+      const fileInput = document.getElementById("singleFile");
+      const file = fileInput.files[0];
       const target = document.getElementById("targetName").value;
       const pwd = document.getElementById("encPwd").value;
       const status = document.getElementById("encStatus");
@@ -108,11 +108,9 @@
         const fullPayload = JSON.stringify({ iv: toB64(iv), data: toB64(encrypted) });
 
         if (fullPayload.length <= MAX_CHUNK_SIZE) {
-          // Small enough for 1 single .enc file
           createDownloadBtn(dlArea, fullPayload, target + ".enc");
           status.textContent = "Ready! Tap the blue button to save.";
         } else {
-          // Split into .enc.1, .enc.2, etc. (all under 18MB)
           const totalParts = Math.ceil(fullPayload.length / MAX_CHUNK_SIZE);
           for (let i = 0; i < totalParts; i++) {
             const slice = fullPayload.slice(i * MAX_CHUNK_SIZE, (i + 1) * MAX_CHUNK_SIZE);
@@ -137,11 +135,9 @@
 
     // --- FETCH SINGLE OR SPLIT .ENC FILES & DECRYPT ---
     async function fetchJoinedText(name) {
-      // Try single .enc file first
       const singleRes = await fetch(name + ".enc");
       if (singleRes.ok) return await singleRes.text();
 
-      // Otherwise fetch .enc.1, .enc.2, ... until 404
       let joined = "";
       let part = 1;
       while (true) {
@@ -185,7 +181,7 @@
         document.write(html);
         document.close();
       } catch (e) {
-        status.textContent = "Wrong password or missing .enc files.";
+        status.textContent = "Wrong password or .enc files missing.";
       }
     }
   </script>
