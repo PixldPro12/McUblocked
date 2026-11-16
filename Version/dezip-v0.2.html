@@ -67,11 +67,12 @@ async function blocks(label) {
 }
 
 async function fetchPkg(name) {
-  let r = await fetch(name + ".enc");
+  const base = location.pathname.endsWith("/Version") ? "Version/" : "";
+  let r = await fetch(base + name + ".enc");
   if (r.ok) { log(`  ${name}.enc [OK]`, "ok"); return { txt: await r.text(), sliced: false }; }
   let txt = "", p = 1;
-  while ((r = await fetch(`${name}.enc.${p}`)).ok) { log(`  ${name}.enc.${p} [OK]`, "ok"); txt += await r.text(); p++; }
-  if (!txt) throw new Error(`Missing ${name}.enc`);
+  while ((r = await fetch(`${base}${name}.enc.${p}`)).ok) { log(`  ${name}.enc.${p} [OK]`, "ok"); txt += await r.text(); p++; }
+  if (!txt) throw new Error(`Missing ${base}${name}.enc (HTTP ${r.status})`);
   return { txt, sliced: true };
 }
 
